@@ -1,0 +1,117 @@
+name: Build, Push, and Deploy ip-finder app to aks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ env.DOCKERHUB_USERNAME }}
+        password: ${{ env.DOCKERHUB_TOKEN }}
+
+    - name: Build and Push Docker Image
+      run: |
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/container-ip-finder:latest .
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/container-ip-finder:latest
+
+  terraform-apply:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ env.AZURE_CREDENTIALS }}
+
+    - name: Extract Azure Credentials
+      id: azure-creds
+      run: |
+        echo "::set-output name=subscription_id::$(echo '${{ env.AZURE_CREDENTIALS }}' | jq -r .subscriptionId)"
+        echo "::set-output name=client_id::$(echo '${{ env.AZURE_CREDENTIALS }}' | jq -r .clientId)"
+        echo "::set-output name=client_secret::$(echo '${{ env.AZURE_CREDENTIALS }}' | jq -r .clientSecret)"
+        echo "::set-output name=tenant_id::$(echo '${{ env.AZURE_CREDENTIALS }}' | jq -r .tenantId)"
+
+    - name: Create Azure Storage Account and Container
+      run: |
+          # Variables
+          RESOURCE_GROUP="myTerraformStateRG124334545346"
+          STORAGE_ACCOUNT="iptfstatestore123245646"
+          CONTAINER_NAME="terrastate323456533"
+
+          # Create Resource Group if it does not exist
+          if ! az group show --name $RESOURCE_GROUP --query "name" --output tsv; then
+            echo "Creating Resource Group: $RESOURCE_GROUP"
+            az group create --name $RESOURCE_GROUP --location eastus
+          else
+            echo "Resource Group $RESOURCE_GROUP already exists"
+          fi
+
+          # Check if Storage Account exists
+          if ! az storage account show --name $STORAGE_ACCOUNT --resource-group $RESOURCE_GROUP --query "name" --output tsv; then
+            echo "Creating Storage Account: $STORAGE_ACCOUNT"
+            az storage account create --name $STORAGE_ACCOUNT --resource-group $RESOURCE_GROUP --location eastus --sku Standard_LRS
+          else
+            echo "Storage Account $STORAGE_ACCOUNT already exists"
+          fi
+
+          # Get Storage Account Key
+          ACCOUNT_KEY=$(az storage account keys list --resource-group $RESOURCE_GROUP --account-name $STORAGE_ACCOUNT --query '[0].value' --output tsv)
+
+          # Create Blob Container if it does not exist
+          if ! az storage container show --name $CONTAINER_NAME --account-name $STORAGE_ACCOUNT --account-key $ACCOUNT_KEY --query "name" --output tsv; then
+            echo "Creating Blob Container: $CONTAINER_NAME"
+            az storage container create --name $CONTAINER_NAME --account-name $STORAGE_ACCOUNT --account-key $ACCOUNT_KEY
+          else
+            echo "Blob Container $CONTAINER_NAME already exists"
+          fi
+
+    - name: Terraform Init
+      run: |
+        terraform init \
+          -backend-config="storage_account_name=iptfstatestore123245646" \
+          -backend-config="container_name=terrastate323456533" \
+          -backend-config="key=terraform.tfstate" \
+          -backend-config="resource_group_name=myTerraformStateRG124334545346" \
+          -backend-config="subscription_id=${{ steps.azure-creds.outputs.subscription_id }}" \
+          -backend-config="client_id=${{ steps.azure-creds.outputs.client_id }}" \
+          -backend-config="client_secret=${{ steps.azure-creds.outputs.client_secret }}" \
+          -backend-config="tenant_id=${{ steps.azure-creds.outputs.tenant_id }}"
+
+    - name: Terraform Plan
+      run: |
+       terraform plan -out=tfplan \
+        -var="image=${{ env.DOCKERHUB_USERNAME }}/container-ip-finder:latest" \
+        -var="subscription_id=${{ steps.azure-creds.outputs.subscription_id }}" \
+        -var="client_id=${{ steps.azure-creds.outputs.client_id }}" \
+        -var="client_secret=${{ steps.azure-creds.outputs.client_secret }}" \
+        -var="tenant_id=${{ steps.azure-creds.outputs.tenant_id }}"
+
+    - name: Terraform Apply
+      run: terraform apply -auto-approve tfplan
+
+    - name: Update Kubernetes Deployment
+      run: |
+        az aks get-credentials --resource-group myAKSResourceGroup --name myAKSCluster
+        kubectl set image deployment/my-ip-finder-deployment ip-finder=${{ env.DOCKERHUB_USERNAME }}/container-ip-finder:latest
