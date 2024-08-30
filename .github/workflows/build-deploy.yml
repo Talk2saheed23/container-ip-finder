@@ -101,7 +101,12 @@ jobs:
           
     - name: Terraform Destroy
       run: |
-       terraform destroy
+       terraform destroy \
+        -var="image=${{ env.DOCKERHUB_USERNAME }}/container-ip-finder:latest" \
+        -var="subscription_id=${{ steps.azure-creds.outputs.subscription_id }}" \
+        -var="client_id=${{ steps.azure-creds.outputs.client_id }}" \
+        -var="client_secret=${{ steps.azure-creds.outputs.client_secret }}" \
+        -var="tenant_id=${{ steps.azure-creds.outputs.tenant_id }}"
        
     - name: Terraform Plan
       run: |
