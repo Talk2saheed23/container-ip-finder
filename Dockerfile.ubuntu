@@ -1,0 +1,18 @@
+# Use a lightweight Ubuntu image
+FROM ubuntu:24.10
+
+# Install necessary packages: curl and nginx
+RUN apt-get update && apt-get install -y python3
+
+# Copy the bash script into the container
+COPY script.sh /usr/local/bin/script.sh
+
+# Make the script executable
+RUN chmod +x /usr/local/bin/script.sh
+
+RUN mkdir -p /var/www/html
+
+# Expose port 80 for the web server
+EXPOSE 80
+
+CMD ["/usr/local/bin/script.sh"]
