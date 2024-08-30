@@ -101,7 +101,7 @@ jobs:
           
     - name: Terraform Destroy
       run: |
-       terraform destroy tfplan
+       terraform destroy
        
     - name: Terraform Plan
       run: |
