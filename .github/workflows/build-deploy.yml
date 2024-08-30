@@ -107,6 +107,7 @@ jobs:
         -var="client_id=${{ steps.azure-creds.outputs.client_id }}" \
         -var="client_secret=${{ steps.azure-creds.outputs.client_secret }}" \
         -var="tenant_id=${{ steps.azure-creds.outputs.tenant_id }}"
+      continue-on-error: true
        
     - name: Terraform Plan
       run: |
