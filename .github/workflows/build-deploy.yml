@@ -98,7 +98,11 @@ jobs:
           -backend-config="client_id=${{ steps.azure-creds.outputs.client_id }}" \
           -backend-config="client_secret=${{ steps.azure-creds.outputs.client_secret }}" \
           -backend-config="tenant_id=${{ steps.azure-creds.outputs.tenant_id }}"
-
+          
+    - name: Terraform Destroy
+      run: |
+       terraform destroy tfplan
+       
     - name: Terraform Plan
       run: |
        terraform plan -out=tfplan \
